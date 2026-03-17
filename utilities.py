@@ -184,9 +184,10 @@ def get_IB_bound(p_XgY,p_Y,N_b=1000,max_b=50,iterlimit=100000,init='random', N_i
 # get the IB measures for the IB optimal choice policy (computed using the true p(X,Y)) for a particular trial set (empirical p(X,Y))
 def get_IB_emp(beta,Xemp,Xset,Yemp,p_XgY_true,p_Y_true, iterlimit=100000, init='random', N_inits=3, betastar=None, base_seed=209, ib_num=0):
 
-    N_emp = Xemp.shape[0]
+    N_trials = Xemp.shape[0]
+    N_Y = p_Y_true.shape[1]
     Yemp_oh = np.eye(N_Y)[Yemp.astype(int)]
-    p_Y_emp = np.sum(Yemp_oh,axis=0,keepdims=True) / N_emp
+    p_Y_emp = np.sum(Yemp_oh,axis=0,keepdims=True) / N_trials
 
     Xinds = np.zeros(Xemp.shape[0], dtype=int)
     for ii, x in enumerate(Xset):
@@ -196,7 +197,7 @@ def get_IB_emp(beta,Xemp,Xset,Yemp,p_XgY_true,p_Y_true, iterlimit=100000, init='
     out = solve_IB(beta, p_XgY_true, p_Y_true, iterlimit=iterlimit, init=init, N_inits=N_inits, betastar=betastar, base_seed=base_seed, ib_num=ib_num)
     p_RgX = out[4]
     p_RgX_emp = p_RgX[Xinds,:]
-    p_RX_emp = p_RgX_emp * (1/N_emp)
+    p_RX_emp = p_RgX_emp * (1/N_trials)
     p_R_emp = np.sum(p_RX_emp, axis=0, keepdims=True)
     p_XgR_emp = p_RX_emp / p_R_emp
     p_YgR_emp = Yemp_oh.T @ p_XgR_emp
@@ -209,11 +210,11 @@ def get_IB_emp(beta,Xemp,Xset,Yemp,p_XgY_true,p_Y_true, iterlimit=100000, init='
 def get_IB_emp_mp(args):
     return get_IB_emp(*args)
 
-def get_IB_bound_emp(Xemp,Xset,Yemp,p_XgY,p_Y,N_b=1000,max_b=50,iterlimit=100000,init='random', N_inits=3, betastar=None, N_threads=1, base_seed=209):
+def get_IB_bound_emp(Xemp,Xset,Yemp,p_XgY_true,p_Y_true,N_b=1000,max_b=50,iterlimit=100000,init='random', N_inits=3, betastar=None, N_threads=1, base_seed=209):
     beta_array = np.linspace(max_b/N_b,max_b,N_b)
 
     with mp.Pool(processes=N_threads) as pool:
-        results = [pool.apply_async(get_IB_emp_mp, args=((beta_array[ib], Xemp, Xset, Yemp, p_XgY, p_Y, iterlimit, init, N_inits, betastar, base_seed, ib),)) for ib in range(N_b)]
+        results = [pool.apply_async(get_IB_emp_mp, args=((beta_array[ib], Xemp, Xset, Yemp, p_XgY_true, p_Y_true, iterlimit, init, N_inits, betastar, base_seed, ib),)) for ib in range(N_b)]
         results = [res.get() for res in results]
     I_XR_emp = [res[0] for res in results]
     I_RY_emp = [res[1] for res in results]
@@ -226,7 +227,7 @@ def get_IB_bound_emp(Xemp,Xset,Yemp,p_XgY,p_Y,N_b=1000,max_b=50,iterlimit=100000
 
 # get IB measures for the softmax policy on the true p(X,Y)
 def get_softmax_IB(betastar,p_XgY,p_Y):
-   
+    N_Y = p_XgY.shape[1]
     p_XY = p_XgY * p_Y
     p_X = np.sum(p_XY, axis=1, keepdims=True)
     p_YgX = p_XY / p_X
@@ -238,27 +239,45 @@ def get_softmax_IB(betastar,p_XgY,p_Y):
     p_YgR =  p_YgX.T @ p_XgR
 
     accuracy = np.trace(p_YgR * p_R)
+    alphastar = np.log(accuracy/((1-accuracy)/(N_Y-1))) # alpha* and this expression itself is only valid when p(Y) is uniform
+    beta = betastar / alphastar
     I_XR = compute_I_XR(p_RgX,p_XgY,p_Y)
     I_RY = compute_I_RY(p_RgX,p_XgY,p_Y)
     H_R = -np.sum(p_R * np.log2(p_R))
-    return I_XR, I_RY, betastar, H_R, p_RgX, p_YgR, p_R
+    return I_XR, I_RY, betastar, H_R, accuracy, alphastar, beta, p_RgX, p_YgR, p_R
 
 def get_softmax_IB_bound(p_XgY,p_Y,N_b=1000,max_b=50):
     betastar_array = np.linspace(max_b/N_b,max_b,N_b)
-    I_XRs = [], I_RYs = [], H_Rs = [], accuracies = []
+    I_XRs = [], I_RYs = [], H_Rs = [], accuracies = [], alphastars = [], betas = []
     for betastar in betastar_array:
         out = get_softmax_IB(betastar,p_XgY,p_Y)
         I_XRs.append(out[0])
         I_RYs.append(out[1])
         H_Rs.append(out[3])
-        accuracy = np.trace(out[5] * out[6])
-        accuracies.append(accuracy)
-    accuracies = np.array(accuracies)
-    alphastars = np.log(accuracies/((1-accuracies)/(N_y-1))) # alpha* and this expression itself is only valid when p(Y) is uniform
-    betas = betastar_array / alphastars
-    return np.array(I_XRs), np.array(I_RYs), betastar_array, np.array(H_Rs), accuracies, alphastars, betas
+        accuracies.append(out[4])
+        alphastars.append(out[5])
+        betas.append(out[6])
+    return np.array(I_XRs), np.array(I_RYs), betastar_array, np.array(H_Rs), np.array(accuracies), np.array(alphastars), np.array(betas)
 
-def get_softmax_IB_bound_emp()
+def get_softmax_IB_emp(betastar,Xemp,Yemp,p_YgX_emp):
+    N_trials = Xemp.shape[0]
+    N_Y = p_YgX_emp.shape[1]
+    Yemp_oh = np.eye(N_Y)[Yemp.astype(int)]
+    p_Y_emp = np.sum(Yemp_oh,axis=0,keepdims=True) / N_trials
+    p_RgX_emp = np.exp(betastar*p_YgX_emp) / np.sum(np.exp(betastar*p_YgX_emp),axis=1,keepdims=True)
+    p_RX_emp = p_RgX_emp * (1/N_trials)
+    p_R_emp = np.sum(p_RX_emp, axis=0, keepdims=True)
+    p_XgR_emp = p_RX_emp / p_R_emp
+    p_YgR_emp = Yemp_oh.T @ p_XgR_emp
+    I_XR_emp = compute_I_XR_emp(p_RgX_emp)
+    I_RY_emp = compute_I_RY_emp(p_RgX_emp, Yemp)
+    H_R_emp = -np.sum(p_R_emp * np.log2(p_R_emp))
+    accuracy = np.trace(p_YgR_emp * p_R_emp)
+    alphastar = np.log(accuracy/((1-accuracy)/(N_Y-1))) # alpha* and this expression itself is only valid when p(Y) is uniform
+    beta = betastar / alphastar
+    return I_XR_emp, I_RY_emp, betastar, H_R_emp, accuracy, alphastar, beta, p_RgX_emp, p_YgR_emp, p_R_emp
+
+def get_softmax_IB_bound_emp(Xemp,Yemp,p_YgX_emp,N_b=1000,max_b=50):
 
 # compute likelihood distributions for the horse prediction task
 def llr2probs_4shapes(llr,p1):
