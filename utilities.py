@@ -1,7 +1,8 @@
 import numpy as np
 import ndd
-from math import factorial
+from scipy.special import factorial
 import multiprocessing as mp
+from itertools import combinations_with_replacement
 
 ### Functions for performing IB analyses on empirical data ###
 
@@ -42,14 +43,17 @@ def compute_I_RY(p_RgX,p_XgY,p_Y):
 
 # compute I(X;R) using empirical list of choice probabilities for each trial (for model- or algorithm-computed choice probabilities only)
 def compute_I_XR_emp(p_RgX_emp):
-    p_RX_emp = p_RgX_emp * (1/N_emp)
+    N_trials = p_RgX_emp.shape[0]
+    p_RX_emp = p_RgX_emp * (1/N_trials)
     return np.sum(p_RX_emp*np.log2(p_RgX_emp/np.sum(p_RX_emp, axis=0, keepdims=True)))
 
 # compute I(R;Y) using empirical list of choice probabilities and empirical list of Y for each trial (for model- or algorithm-computed choice probabilities only)
 def compute_I_RY_emp(p_RgX_emp, Yemp):
+    N_trials = p_RgX_emp.shape[0]
+    N_Y = p_RgX_emp.shape[1]
     Yemp_oh = np.eye(N_Y)[Yemp.astype(int)]
-    p_Y_emp = np.sum(Yemp_oh,axis=0,keepdims=True) / N_emp
-    p_RX_emp = p_RgX_emp * (1/N_emp)
+    p_Y_emp = np.sum(Yemp_oh,axis=0,keepdims=True) / N_trials
+    p_RX_emp = p_RgX_emp * (1/N_trials)
     p_R_emp = np.sum(p_RX_emp, axis=0, keepdims=True)
     p_XgR_emp = p_RX_emp / p_R_emp
     p_YgR_emp = Yemp_oh.T @ p_XgR_emp
@@ -88,7 +92,7 @@ def get_map_inds(p_YgR,axis=1):
     return map_inds, inv_map_inds, mask
 
 # a function for solving the IB problem for a given beta, with multiple random initializations
-def solve_IB(beta, p_XgY, p_Y, iterlimit=100000, init='random', N_inits=3, betastar=None, base_seed=209, ib_num=0):
+def solve_IB(beta, p_XgY, p_Y, iterlimit=100000, init='random', N_inits=3, betastar=None, base_seed=209, ib_num=0, return_dict=True):
 
     rng = np.random.default_rng(base_seed + ib_num)
 
@@ -157,13 +161,26 @@ def solve_IB(beta, p_XgY, p_Y, iterlimit=100000, init='random', N_inits=3, betas
     I_XR = compute_I_XR(p_RgX,p_XgY,p_Y)
     I_RY = compute_I_RY(p_RgX,p_XgY,p_Y)
 
-    return [I_XR, I_RY, beta, H_R, p_RgX, p_YgR, p_R, betastar]
+    if return_dict:
+        out = {
+            'I_XR': I_XR,
+            'I_RY': I_RY,
+            'beta': beta,
+            'H_R': H_R,
+            'p_RgX': p_RgX,
+            'p_YgR': p_YgR,
+            'p_R': p_R,
+            'betastar': betastar
+        }
+        return out
+    else:
+        return [I_XR, I_RY, beta, H_R, p_RgX, p_YgR, p_R, betastar]
 
 # a function for solving the IB problem for a given beta, with multiple random initializations
 # this is function is intended to be used within a multiprocessing call, so it takes in all of the arguments as a single tuple
 def solve_IB_mp(args):
     beta, p_XgY, p_Y, iterlimit, init, N_inits, betastar, base_seed, ib_num = args
-    return solve_IB(beta, p_XgY, p_Y, iterlimit=iterlimit, init=init, N_inits=N_inits, betastar=betastar, base_seed=base_seed, ib_num=ib_num)
+    return solve_IB(beta, p_XgY, p_Y, iterlimit=iterlimit, init=init, N_inits=N_inits, betastar=betastar, base_seed=base_seed, ib_num=ib_num, return_dict=False)
 
 # beta, p_XgY, p_Y, iterlimit, init, N_inits, betastar, base_seed, ib_num = args
 def get_IB_bound(p_XgY,p_Y,N_b=1000,max_b=50,iterlimit=100000,init='random', N_inits=3, betastar=None, N_threads=1, base_seed=209):
@@ -179,10 +196,17 @@ def get_IB_bound(p_XgY,p_Y,N_b=1000,max_b=50,iterlimit=100000,init='random', N_i
 
     # to ensure that the points on the IB curve are in order of increasing beta, we can sort the results by beta before returning
     sort_indices = np.argsort(betas)
-    return np.array(I_XR)[sort_indices], np.array(I_RY)[sort_indices], np.array(betas)[sort_indices], np.array(H_Rs)[sort_indices]
+    out = {
+        'I_XR': np.array(I_XR)[sort_indices],
+        'I_RY': np.array(I_RY)[sort_indices],
+        'beta': np.array(betas)[sort_indices],
+        'H_R': np.array(H_Rs)[sort_indices]
+    }
+    # return np.array(I_XR)[sort_indices], np.array(I_RY)[sort_indices], np.array(betas)[sort_indices], np.array(H_Rs)[sort_indices]
+    return out
 
 # get the IB measures for the IB optimal choice policy (computed using the true p(X,Y)) for a particular trial set (empirical p(X,Y))
-def get_IB_emp(beta,Xemp,Xset,Yemp,p_XgY_true,p_Y_true, iterlimit=100000, init='random', N_inits=3, betastar=None, base_seed=209, ib_num=0):
+def get_IB_emp(beta,Xemp,Xset,Yemp,p_XgY_true,p_Y_true, iterlimit=100000, init='random', N_inits=3, betastar=None, base_seed=209, ib_num=0,return_dict=True):
 
     N_trials = Xemp.shape[0]
     N_Y = p_Y_true.shape[1]
@@ -194,7 +218,7 @@ def get_IB_emp(beta,Xemp,Xset,Yemp,p_XgY_true,p_Y_true, iterlimit=100000, init='
         matches = np.all(Xemp == x, axis=1)
         Xinds[matches] = ii
 
-    out = solve_IB(beta, p_XgY_true, p_Y_true, iterlimit=iterlimit, init=init, N_inits=N_inits, betastar=betastar, base_seed=base_seed, ib_num=ib_num)
+    out = solve_IB(beta, p_XgY_true, p_Y_true, iterlimit=iterlimit, init=init, N_inits=N_inits, betastar=betastar, base_seed=base_seed, ib_num=ib_num, return_dict=False)
     p_RgX = out[4]
     p_RgX_emp = p_RgX[Xinds,:]
     p_RX_emp = p_RgX_emp * (1/N_trials)
@@ -204,7 +228,20 @@ def get_IB_emp(beta,Xemp,Xset,Yemp,p_XgY_true,p_Y_true, iterlimit=100000, init='
     I_XR_emp = compute_I_XR_emp(p_RgX_emp)
     I_RY_emp = compute_I_RY_emp(p_RgX_emp, Yemp)
     H_R_emp = -np.sum(p_R_emp * np.log2(p_R_emp))
-    return I_XR_emp, I_RY_emp, beta, H_R_emp, p_RgX_emp, p_YgR_emp, p_R_emp, betastar
+    if return_dict:
+        out = {
+            'I_XR': I_XR_emp,
+            'I_RY': I_RY_emp,
+            'beta': beta,
+            'H_R': H_R_emp,
+            'p_RgX': p_RgX_emp,
+            'p_YgR': p_YgR_emp,
+            'p_R': p_R_emp,
+            'betastar': betastar
+        }
+        return out
+    else:
+        return [I_XR_emp, I_RY_emp, beta, H_R_emp, p_RgX_emp, p_YgR_emp, p_R_emp, betastar]
 
 # same as above, but for multiprocessing
 def get_IB_emp_mp(args):
@@ -214,7 +251,7 @@ def get_IB_bound_emp(Xemp,Xset,Yemp,p_XgY_true,p_Y_true,N_b=1000,max_b=50,iterli
     beta_array = np.linspace(max_b/N_b,max_b,N_b)
 
     with mp.Pool(processes=N_threads) as pool:
-        results = [pool.apply_async(get_IB_emp_mp, args=((beta_array[ib], Xemp, Xset, Yemp, p_XgY_true, p_Y_true, iterlimit, init, N_inits, betastar, base_seed, ib),)) for ib in range(N_b)]
+        results = [pool.apply_async(get_IB_emp_mp, args=((beta_array[ib], Xemp, Xset, Yemp, p_XgY_true, p_Y_true, iterlimit, init, N_inits, betastar, base_seed, ib, False),)) for ib in range(N_b)]
         results = [res.get() for res in results]
     I_XR_emp = [res[0] for res in results]
     I_RY_emp = [res[1] for res in results]
@@ -223,10 +260,17 @@ def get_IB_bound_emp(Xemp,Xset,Yemp,p_XgY_true,p_Y_true,N_b=1000,max_b=50,iterli
 
     # to ensure that the points on the IB curve are in order of increasing beta, we can sort the results by beta before returning
     sort_indices = np.argsort(betas)
-    return np.array(I_XR_emp)[sort_indices], np.array(I_RY_emp)[sort_indices], np.array(betas)[sort_indices], np.array(H_Rs)[sort_indices]
+    out = {
+        'I_XR': np.array(I_XR_emp)[sort_indices],
+        'I_RY': np.array(I_RY_emp)[sort_indices],
+        'beta': np.array(betas)[sort_indices],
+        'H_R': np.array(H_Rs)[sort_indices]
+    }
+    # return np.array(I_XR_emp)[sort_indices], np.array(I_RY_emp)[sort_indices], np.array(betas)[sort_indices], np.array(H_Rs)[sort_indices]
+    return out
 
 # get IB measures for the softmax policy on the true p(X,Y)
-def get_softmax_IB(betastar,p_XgY,p_Y):
+def get_softmax_IB(betastar,p_XgY,p_Y,return_dict=True):
     N_Y = p_XgY.shape[1]
     p_XY = p_XgY * p_Y
     p_X = np.sum(p_XY, axis=1, keepdims=True)
@@ -244,26 +288,50 @@ def get_softmax_IB(betastar,p_XgY,p_Y):
     I_XR = compute_I_XR(p_RgX,p_XgY,p_Y)
     I_RY = compute_I_RY(p_RgX,p_XgY,p_Y)
     H_R = -np.sum(p_R * np.log2(p_R))
-    return I_XR, I_RY, betastar, H_R, accuracy, alphastar, beta, p_RgX, p_YgR, p_R
+    if return_dict:
+        out = {
+            'I_XR': I_XR,
+            'I_RY': I_RY,
+            'betastar': betastar,
+            'H_R': H_R,
+            'accuracy': accuracy,
+            'alphastar': alphastar,
+            'beta': beta,
+            'p_RgX': p_RgX,
+            'p_YgR': p_YgR,
+            'p_R': p_R
+        }
+        return out
+    else:
+        return I_XR, I_RY, betastar, H_R, accuracy, alphastar, beta, p_RgX, p_YgR, p_R
 
-def get_softmax_IB_bound(p_XgY,p_Y,N_b=1000,max_b=50):
+def get_softmax_IB_curve(p_XgY,p_Y,N_b=1000,max_b=50):
     betastar_array = np.linspace(max_b/N_b,max_b,N_b)
-    I_XRs = [], I_RYs = [], H_Rs = [], accuracies = [], alphastars = [], betas = []
+    I_XRs, I_RYs, H_Rs, accuracies, alphastars, betas = [], [], [], [], [], []
     for betastar in betastar_array:
-        out = get_softmax_IB(betastar,p_XgY,p_Y)
+        out = get_softmax_IB(betastar,p_XgY,p_Y,return_dict=False)
         I_XRs.append(out[0])
         I_RYs.append(out[1])
         H_Rs.append(out[3])
         accuracies.append(out[4])
         alphastars.append(out[5])
         betas.append(out[6])
-    return np.array(I_XRs), np.array(I_RYs), betastar_array, np.array(H_Rs), np.array(accuracies), np.array(alphastars), np.array(betas)
+    out = {
+        'I_XR': np.array(I_XRs),
+        'I_RY': np.array(I_RYs),
+        'betastar_array': betastar_array,
+        'H_R': np.array(H_Rs),
+        'accuracy': np.array(accuracies),
+        'alphastar': np.array(alphastars),
+        'beta': np.array(betas)
+    }
+    return out
+    # return np.array(I_XRs), np.array(I_RYs), betastar_array, np.array(H_Rs), np.array(accuracies), np.array(alphastars), np.array(betas)
 
-def get_softmax_IB_emp(betastar,Xemp,Yemp,p_YgX_emp):
+def get_softmax_IB_emp(betastar,Xemp,Yemp,p_YgX_emp,return_dict=True):
     N_trials = Xemp.shape[0]
     N_Y = p_YgX_emp.shape[1]
     Yemp_oh = np.eye(N_Y)[Yemp.astype(int)]
-    p_Y_emp = np.sum(Yemp_oh,axis=0,keepdims=True) / N_trials
     p_RgX_emp = np.exp(betastar*p_YgX_emp) / np.sum(np.exp(betastar*p_YgX_emp),axis=1,keepdims=True)
     p_RX_emp = p_RgX_emp * (1/N_trials)
     p_R_emp = np.sum(p_RX_emp, axis=0, keepdims=True)
@@ -275,9 +343,126 @@ def get_softmax_IB_emp(betastar,Xemp,Yemp,p_YgX_emp):
     accuracy = np.trace(p_YgR_emp * p_R_emp)
     alphastar = np.log(accuracy/((1-accuracy)/(N_Y-1))) # alpha* and this expression itself is only valid when p(Y) is uniform
     beta = betastar / alphastar
-    return I_XR_emp, I_RY_emp, betastar, H_R_emp, accuracy, alphastar, beta, p_RgX_emp, p_YgR_emp, p_R_emp
+    out = {
+        'I_XR': I_XR_emp,
+        'I_RY': I_RY_emp,
+        'betastar': betastar,
+        'H_R': H_R_emp,
+        'accuracy': accuracy,
+        'alphastar': alphastar,
+        'beta': beta,
+        'p_RgX': p_RgX_emp,
+        'p_YgR': p_YgR_emp,
+        'p_R': p_R_emp
+    }
+    if return_dict:
+        return out
+    else:
+        return I_XR_emp, I_RY_emp, betastar, H_R_emp, accuracy, alphastar, beta, p_RgX_emp, p_YgR_emp, p_R_emp
 
-def get_softmax_IB_bound_emp(Xemp,Yemp,p_YgX_emp,N_b=1000,max_b=50):
+def get_softmax_IB_curve_emp(Xemp,Yemp,p_YgX_emp,N_b=1000,max_b=50):
+    betastar_array = np.linspace(max_b/N_b,max_b,N_b)
+    I_XRs, I_RYs, H_Rs, accuracies, alphastars, betas = [], [], [], [], [], []
+    for betastar in betastar_array:
+        out = get_softmax_IB_emp(betastar,Xemp,Yemp,p_YgX_emp,return_dict=False)
+        I_XRs.append(out[0])
+        I_RYs.append(out[1])
+        H_Rs.append(out[3])
+        accuracies.append(out[4])
+        alphastars.append(out[5])
+        betas.append(out[6])
+    out = {
+        'I_XR': np.array(I_XRs),
+        'I_RY': np.array(I_RYs),
+        'betastar_array': betastar_array,
+        'H_R': np.array(H_Rs),
+        'accuracy': np.array(accuracies),
+        'alphastar': np.array(alphastars),
+        'beta': np.array(betas)
+    }
+    # return np.array(I_XRs), np.array(I_RYs), betastar_array, np.array(H_Rs), np.array(accuracies), np.array(alphastars), np.array(betas)
+    return out
+
+def get_general_IB(p_RgX,p_XgY,p_Y,return_dict=True):
+    I_XR = compute_I_XR(p_RgX,p_XgY,p_Y)
+    I_RY = compute_I_RY(p_RgX,p_XgY,p_Y)
+    p_RY = (p_RgX.T @ p_XgY) * p_Y
+    H_R = -np.sum(np.sum(p_RY,axis=1) * np.log2(np.sum(p_RY, axis=1)))
+    accuracy = np.trace(p_RY)
+    if return_dict:
+        out = {
+            'I_XR': I_XR,
+            'I_RY': I_RY,
+            'H_R': H_R,
+            'accuracy': accuracy
+        }
+        return out
+    else:
+        return I_XR, I_RY, H_R, accuracy
+
+def get_general_IB_curve(param_vals,p_XgY,p_Y,P_RgX_fn):
+    #P_RgX_fn is a function that only takes in a parameter value, so any other arguments must be included in the function defintion of P_RgX_fn (e.g. using a lambda function to "pre-load" the other arguments)
+    I_XRs, I_RYs, H_Rs, accuracies = [], [], [], []
+    for param_val in param_vals:
+        p_RgX = P_RgX_fn(param_val)
+        out = get_general_IB(p_RgX,p_XgY,p_Y,return_dict=False)
+        I_XRs.append(out[0])
+        I_RYs.append(out[1])
+        H_Rs.append(out[2])
+        accuracies.append(out[3])
+    out = {
+        'I_XR': np.array(I_XRs),
+        'I_RY': np.array(I_RYs),
+        'H_R': np.array(H_Rs),
+        'accuracy': np.array(accuracies)
+    }
+    # return np.array(I_XRs), np.array(I_RYs), np.array(H_Rs), np.array(accuracies)
+    return out
+
+def get_general_IB_emp(Xemp,Yemp,p_RgX_emp,return_dict=True):
+    N_trials = Xemp.shape[0]
+    N_Y = p_RgX_emp.shape[1]
+    Yemp_oh = np.eye(N_Y)[Yemp.astype(int)]
+    p_RX_emp = p_RgX_emp * (1/N_trials)
+    p_R_emp = np.sum(p_RX_emp, axis=0, keepdims=True)
+    p_XgR_emp = p_RX_emp / p_R_emp
+    p_YgR_emp = Yemp_oh.T @ p_XgR_emp
+    I_XR_emp = compute_I_XR_emp(p_RgX_emp)
+    I_RY_emp = compute_I_RY_emp(p_RgX_emp, Yemp)
+    H_R_emp = -np.sum(p_R_emp * np.log2(p_R_emp))
+    accuracy = np.trace(p_YgR_emp * p_R_emp)
+    if return_dict:
+        out = {
+            'I_XR': I_XR_emp,
+            'I_RY': I_RY_emp,
+            'H_R': H_R_emp,
+            'accuracy': accuracy
+        }
+        return out
+    else:
+        return I_XR_emp, I_RY_emp, H_R_emp, accuracy
+
+def get_general_IB_curve_emp(param_vals,Xemp,Yemp,p_RgX_emp_fn):
+    I_XRs = []
+    I_RYs = []
+    H_Rs = []
+    accuracies = []
+    for param_val in param_vals:
+        p_RgX_emp = p_RgX_emp_fn(param_val)
+        out = get_general_IB_emp(Xemp,Yemp,p_RgX_emp, return_dict=False)
+        I_XRs.append(out[0])
+        I_RYs.append(out[1])
+        H_Rs.append(out[2])
+        accuracies.append(out[3])
+    out = {
+        'I_XR': np.array(I_XRs),
+        'I_RY': np.array(I_RYs),
+        'H_R': np.array(H_Rs),
+        'accuracy': np.array(accuracies)
+    }
+    return out
+
+### Functions for computing likelihoods and posteriors for the horse prediction task ###
 
 # compute likelihood distributions for the horse prediction task
 def llr2probs_4shapes(llr,p1):
@@ -314,6 +499,17 @@ def split_to_four_digits(arr):
         result[i] = [int(d) for d in digits]
     result = result[:, ::-1]  # reverse the order to get [shape1, shape2, shape3, shape4]
     return result
+
+def get_shapes_Xset():
+    # get all possible shape combinations (with replacement) for 5 shapes and 4 shape types
+    shape_combs = list(combinations_with_replacement(range(4), 5))
+    Xset = np.array(shape_combs)
+    # change to encode how many of each shape type are present in order of num_shape1, num_shape2, num_shape3, num_shape4
+    Xset_counts = np.zeros((Xset.shape[0], 4), dtype=int)
+    for i, comb in enumerate(Xset):
+        for shape in comb:
+            Xset_counts[i, shape] += 1
+    return Xset_counts
 
 # compute likelihood of shape combination given horse
 def P_shapecomb_g_horse(X, base, multiple, p1):
