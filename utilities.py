@@ -1,6 +1,7 @@
 import numpy as np
 import ndd
 from scipy.special import factorial
+from scipy.special import softmax
 import multiprocessing as mp
 from itertools import combinations_with_replacement
 from itertools import product
@@ -28,25 +29,63 @@ def getXY_beads(bead_seq,jar_seq,wsize,encodeX=False,ref_wsize=None):
         X = np.array([sum(aux_base*np.array(bead_seq[i:(i+wsize)])) for i in np.arange(ref_wsize-wsize,len(bead_seq)-wsize)])
     else:
         X = np.array([bead_seq[i:(i+wsize)] for i in np.arange(ref_wsize-wsize,len(bead_seq)-wsize)])
-    return X,Y
+    return X.astype(int),Y.astype(int)
 
 def getR_beads(choices,wsize):
     return choices[wsize:]
 
-def get_bootstrapped_Iry(R,Y,iters=1000,Rcard=2,Ycard=2,seed=234):
-    Iry_boot = []
+def Iry_boot_iter(args):
+    Remp, Yemp, Rcard, Ycard, baseseed, iterseed = args
+    rng = np.random.default_rng(baseseed+iterseed)
+    bootinds = rng.choice(Remp.shape[0],Remp.shape[0])
+    return mutual_inf_nsb(Remp[bootinds],Yemp[bootinds],[Rcard,Ycard])
 
-    rng = np.random.default_rng(seed)
-
-    for ii in range(iters):
-        bootinds = rng.choice(R.shape[0],R.shape[0])
-        Iry_boot.append(mutual_inf_nsb(R[bootinds],Y[bootinds],[Rcard,Ycard]))
-
+def get_bootstrapped_Iry(Remp,Yemp,iters=1000,Rcard=2,Ycard=2,seed=234,N_threads=1):
+    with mp.Pool(processes=N_threads) as pool:
+        results = [pool.apply_async(Iry_boot_iter, args=((Remp, Yemp, Rcard, Ycard, seed, iterseed),)) for iterseed in range(iters)]
+        Iry_boot = [res.get() for res in results]
     return np.array(Iry_boot)
 
-def get_Iry_CI(R,Y,CI,boot_iters,Rcard=2,Ycard=2,seed=234):
-    Iry_boot = get_bootstrapped_Iry(R,Y,boot_iters,Rcard=Rcard,Ycard=Ycard,seed=seed)
+def get_Iry_CI(R,Y,CI,boot_iters,Rcard=2,Ycard=2,seed=234,N_threads=1):
+    Iry_boot = get_bootstrapped_Iry(R,Y,boot_iters,Rcard=Rcard,Ycard=Ycard,seed=seed,N_threads=N_threads)
     return np.percentile(Iry_boot,CI)
+
+# def get_bootstrapped_Iry(R,Y,iters=1000,Rcard=2,Ycard=2,seed=234,pseed=0):
+#     Iry_boot = []
+
+#     rng = np.random.default_rng(seed+pseed)
+
+#     for ii in range(iters):
+#         bootinds = rng.choice(R.shape[0],R.shape[0])
+#         Iry_boot.append(mutual_inf_nsb(R[bootinds],Y[bootinds],[Rcard,Ycard]))
+
+#     return np.array(Iry_boot)
+
+# # with mp.Pool(processes=N_threads) as pool:
+# #         results = [pool.apply_async(solve_IB_mp, args=((beta_array[ib], p_XgY, p_Y, iterlimit, init, N_inits, betastar, base_seed, ib),)) for ib in range(N_b)]
+# #         results = [res.get() for res in results]
+# #     I_XR = [res[0] for res in results]
+# #     I_RY = [res[1] for res in results]
+# #     betas = [res[2] for res in results]
+# #     H_Rs = [res[3] for res in results]
+
+# def get_bootstrapped_Iry_mp(args):
+#     R, Y, iters, Rcard, Ycard, seed, pseed = args
+#     return get_bootstrapped_Iry(R, Y, iters, Rcard, Ycard, seed, pseed)
+
+def classify_by_bound(Ixr_arr, Iry_arr, Iry_CI_low_arr, Iry_CI_up_arr, IB_bounds,bound_labels=None):
+    bound_class_arr = np.zeros_like(Ixr_arr, dtype=int)
+    bound_dist_arr = np.full_like(Ixr_arr, np.inf, dtype=float)
+    for ii, bound in enumerate(IB_bounds):
+        Iry_interp = np.interp(Ixr_arr,bound['I_XR'],bound['I_RY'])
+        Iry_dist = np.abs(Iry_arr - Iry_interp)
+        on_bound = (Iry_CI_low_arr <= Iry_interp) & (Iry_CI_up_arr >= Iry_interp) & (Iry_dist < bound_dist_arr)
+        bound_dist_arr[on_bound] = Iry_dist[on_bound]
+        bound_class_arr[on_bound] = ii + 1 # add 1 to the class index so that 0 can be reserved for "none of the bounds"
+    if bound_labels is not None:
+        bound_labels = ['none'] + bound_labels
+        bound_class_arr = np.array([bound_labels[i] for i in bound_class_arr])
+    return bound_class_arr
 
 ### Functions for computing IB bounds/curves ###
 
@@ -511,13 +550,9 @@ def P_beads_g_jar(bead_seqs,E,H):
     P = np.multiply(L[:,:,bead_seqs.shape[1]-1][:,:,np.newaxis],P)
     return np.squeeze(P)
 
-def P_jar_g_beads(bead_seqs,E,H,p_jar = None):
+def P_jar_g_beads(bead_seqs,E,H,p_jar):
     p_XgY = P_beads_g_jar(bead_seqs,E,H)
-    N_y = p_XgY.shape[1]
-
-    if p_jar is None:
-        p_jar = np.array([1/N_y]*N_y)
-
+    # N_y = p_XgY.shape[1]
     p_XY = p_XgY * p_jar
     p_X = np.sum(p_XY, axis=1, keepdims=True)
     return p_XY / p_X
@@ -597,16 +632,47 @@ def P_shapecomb_g_horse_iw(X, base, multiple, p1):
     return np.column_stack(((pdist1**Xiw).prod(axis=1)*unique_perms,(pdist2**Xiw).prod(axis=1)*unique_perms))
 
 # compute posterior probability of horse given shape combination
-def P_horse_g_shapecomb(X, base, multiple, p1, P_XgY=None, p_Y=None):
+def P_horse_g_shapecomb(X, base, multiple, p1, p_Y, P_XgY=None):
     if P_XgY is None:
         p_XgY = P_shapecomb_g_horse(X, base, multiple, p1)
     else:
         p_XgY = P_XgY(X, base, multiple, p1)
     N_y = p_XgY.shape[1]
 
-    if p_Y is None:
-        p_Y = np.array([1/N_y]*N_y)
-
     p_XY = p_XgY * p_Y
     p_X = np.sum(p_XY, axis=1, keepdims=True)
     return p_XY / p_X
+
+def get_empirical_psychometric_plot(sj_pmf_df,strat_post_prob_df,ax):
+    Nmax = sj_pmf_df['Ntrials'].max()
+    for ii, Xun in enumerate(sj_pmf_df['X'].unique()):
+       postconds = (strat_post_prob_df['X'] == Xun)
+       sjconds = (sj_pmf_df['X'] == Xun)
+       ax.plot(
+            strat_post_prob_df.loc[postconds, 'posterior_prob'].iat[0],
+            sj_pmf_df.loc[sjconds, 'choice_prob'].iat[0],
+            'ok', markersize=3.5, markeredgewidth=0, markeredgecolor='none', alpha=sj_pmf_df.loc[sjconds, 'Ntrials'].iat[0]/Nmax
+        )
+       
+def get_IB_predicted_psychometric_plot(Ixr,bound,color,ax):
+    betastar = np.interp(Ixr, bound['I_XR'], bound['betastar'])
+    p = np.arange(0,1.01,0.01).reshape(-1,1)
+    sigmoid = softmax(betastar*np.concatenate((p,1-p),axis=1),axis=1)[:,0]
+    ax.plot(p.squeeze(), sigmoid.squeeze(), color=color, linewidth=1, linestyle='dashed')
+
+def get_psychometric_DKL(sj_pmf_df,strat_post_prob_df,sj_Ixr,bound):
+    betastar = np.interp(sj_Ixr, bound['I_XR'], bound['betastar'])
+    Ntrials = sj_pmf_df['Ntrials'].sum()
+    DKLs = []
+    for ii, Xun in enumerate(sj_pmf_df['X'].unique()):
+        postcond = (strat_post_prob_df['X'] == Xun)
+        sjcond = (sj_pmf_df['X'] == Xun)
+        p_choice = sj_pmf_df.loc[sjcond, 'choice_prob'].iat[0]
+        p_choice = np.array([p_choice, 1-p_choice])
+        post_prob = strat_post_prob_df.loc[postcond, 'posterior_prob'].iat[0]
+        post_prob = np.array([post_prob, 1-post_prob])
+        p_pred = softmax(betastar * post_prob)
+        p_x = sj_pmf_df.loc[sjcond, 'Ntrials'].iat[0] / Ntrials
+        DKL = p_x * np.nansum(p_choice * np.log(p_choice / p_pred))
+        DKLs.append(DKL)
+    return np.nansum(DKLs)
