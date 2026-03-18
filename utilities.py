@@ -3,6 +3,7 @@ import ndd
 from scipy.special import factorial
 import multiprocessing as mp
 from itertools import combinations_with_replacement
+from itertools import product
 
 ### Functions for performing IB analyses on empirical data ###
 
@@ -11,9 +12,41 @@ def mutual_inf_nsb(x,y,ks):
     """
     Calculate mutual information using NSB method
     """
+    # ks is a list of two values giving the cardinality of the two variables (i.e. number of unique values in each variable)
     ar = np.column_stack((x,y))
     mi = ndd.mutual_information(ar,ks)
     return np.log2(np.e)*mi #ndd returns nats - multiply by log2(e) to convert to bits
+
+# convert the bead and jar sequences into X and Y arrays for IB analyses
+# this function and the one below ensure that X, R, and Y are properly aligned given the way the experiment was run and encoded
+def getXY_beads(bead_seq,jar_seq,wsize,encodeX=False,ref_wsize=None):
+    if ref_wsize is None:
+        ref_wsize = wsize
+    Y = jar_seq[ref_wsize-1:-1]
+    if encodeX:
+        aux_base = 2**np.arange(wsize)
+        X = np.array([sum(aux_base*np.array(bead_seq[i:(i+wsize)])) for i in np.arange(ref_wsize-wsize,len(bead_seq)-wsize)])
+    else:
+        X = np.array([bead_seq[i:(i+wsize)] for i in np.arange(ref_wsize-wsize,len(bead_seq)-wsize)])
+    return X,Y
+
+def getR_beads(choices,wsize):
+    return choices[wsize:]
+
+def get_bootstrapped_Iry(R,Y,iters=1000,Rcard=2,Ycard=2,seed=234):
+    Iry_boot = []
+
+    rng = np.random.default_rng(seed)
+
+    for ii in range(iters):
+        bootinds = rng.choice(R.shape[0],R.shape[0])
+        Iry_boot.append(mutual_inf_nsb(R[bootinds],Y[bootinds],[Rcard,Ycard]))
+
+    return np.array(Iry_boot)
+
+def get_Iry_CI(R,Y,CI,boot_iters,Rcard=2,Ycard=2,seed=234):
+    Iry_boot = get_bootstrapped_Iry(R,Y,boot_iters,Rcard=Rcard,Ycard=Ycard,seed=seed)
+    return np.percentile(Iry_boot,CI)
 
 ### Functions for computing IB bounds/curves ###
 
@@ -463,6 +496,31 @@ def get_general_IB_curve_emp(param_vals,Xemp,Yemp,p_RgX_emp_fn):
     return out
 
 ### Functions for computing likelihoods and posteriors for the horse prediction task ###
+
+def get_beads_Xset(wsize):
+    # get all possible bead sequences for a given window size
+    return np.array([seq for seq in product([0,1],repeat=wsize)])
+
+def P_beads_g_jar(bead_seqs,E,H):
+    bead_seqs_oh = np.transpose(np.eye(E.shape[1])[bead_seqs],(0,2,1))
+    L = np.matmul(E,bead_seqs_oh)
+    H = H.T
+    P = np.ones((bead_seqs.shape[0],E.shape[1],1))
+    for ib in range(1,bead_seqs.shape[1]):
+        P = np.matmul(H,np.multiply(L[:,:,ib-1][:,:,np.newaxis],P))
+    P = np.multiply(L[:,:,bead_seqs.shape[1]-1][:,:,np.newaxis],P)
+    return np.squeeze(P)
+
+def P_jar_g_beads(bead_seqs,E,H,p_jar = None):
+    p_XgY = P_beads_g_jar(bead_seqs,E,H)
+    N_y = p_XgY.shape[1]
+
+    if p_jar is None:
+        p_jar = np.array([1/N_y]*N_y)
+
+    p_XY = p_XgY * p_jar
+    p_X = np.sum(p_XY, axis=1, keepdims=True)
+    return p_XY / p_X
 
 # compute likelihood distributions for the horse prediction task
 def llr2probs_4shapes(llr,p1):
