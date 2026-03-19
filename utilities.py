@@ -391,7 +391,7 @@ def get_softmax_IB_curve(p_XgY,p_Y,N_b=1000,max_b=50):
     out = {
         'I_XR': np.array(I_XRs),
         'I_RY': np.array(I_RYs),
-        'betastar_array': betastar_array,
+        'betastar': betastar_array,
         'H_R': np.array(H_Rs),
         'accuracy': np.array(accuracies),
         'alphastar': np.array(alphastars),
@@ -415,19 +415,19 @@ def get_softmax_IB_emp(betastar,Xemp,Yemp,p_YgX_emp,return_dict=True):
     accuracy = np.trace(p_YgR_emp * p_R_emp)
     alphastar = np.log(accuracy/((1-accuracy)/(N_Y-1))) # alpha* and this expression itself is only valid when p(Y) is uniform
     beta = betastar / alphastar
-    out = {
-        'I_XR': I_XR_emp,
-        'I_RY': I_RY_emp,
-        'betastar': betastar,
-        'H_R': H_R_emp,
-        'accuracy': accuracy,
-        'alphastar': alphastar,
-        'beta': beta,
-        'p_RgX': p_RgX_emp,
-        'p_YgR': p_YgR_emp,
-        'p_R': p_R_emp
-    }
     if return_dict:
+        out = {
+            'I_XR': I_XR_emp,
+            'I_RY': I_RY_emp,
+            'betastar': betastar,
+            'H_R': H_R_emp,
+            'accuracy': accuracy,
+            'alphastar': alphastar,
+            'beta': beta,
+            'p_RgX': p_RgX_emp,
+            'p_YgR': p_YgR_emp,
+            'p_R': p_R_emp
+        }
         return out
     else:
         return I_XR_emp, I_RY_emp, betastar, H_R_emp, accuracy, alphastar, beta, p_RgX_emp, p_YgR_emp, p_R_emp
@@ -446,7 +446,7 @@ def get_softmax_IB_curve_emp(Xemp,Yemp,p_YgX_emp,N_b=1000,max_b=50):
     out = {
         'I_XR': np.array(I_XRs),
         'I_RY': np.array(I_RYs),
-        'betastar_array': betastar_array,
+        'betastar': betastar_array,
         'H_R': np.array(H_Rs),
         'accuracy': np.array(accuracies),
         'alphastar': np.array(alphastars),
@@ -643,7 +643,7 @@ def P_horse_g_shapecomb(X, base, multiple, p1, p_Y, P_XgY=None):
     p_X = np.sum(p_XY, axis=1, keepdims=True)
     return p_XY / p_X
 
-def get_empirical_psychometric_plot(sj_pmf_df,strat_post_prob_df,ax):
+def get_sj_psychometric_plot(sj_pmf_df,strat_post_prob_df,ax):
     Nmax = sj_pmf_df['Ntrials'].max()
     for ii, Xun in enumerate(sj_pmf_df['X'].unique()):
        postconds = (strat_post_prob_df['X'] == Xun)
