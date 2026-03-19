@@ -643,6 +643,8 @@ def P_horse_g_shapecomb(X, base, multiple, p1, p_Y, P_XgY=None):
     p_X = np.sum(p_XY, axis=1, keepdims=True)
     return p_XY / p_X
 
+### Functions for pyschometric analyses
+
 def get_sj_psychometric_plot(sj_pmf_df,strat_post_prob_df,ax):
     Nmax = sj_pmf_df['Ntrials'].max()
     for ii, Xun in enumerate(sj_pmf_df['X'].unique()):
@@ -676,3 +678,14 @@ def get_psychometric_DKL(sj_pmf_df,strat_post_prob_df,sj_Ixr,bound):
         DKL = p_x * np.nansum(p_choice * np.log(p_choice / p_pred))
         DKLs.append(DKL)
     return np.nansum(DKLs)
+
+### Functions for model fitting
+
+def compute_neg_sum_log_likelihood(sj_choices,model_fn,params):
+    N_choices = len(np.unique(sj_choices))
+    choices_oh = np.eye(N_choices)[sj_choices.astype(int)]
+    model_probs = model_fn(params)
+    return -np.nansum(choices_oh*np.log(model_probs))
+
+def compute_BIC(num_params,num_trials,negsumLL):
+    return num_params*np.log(num_trials) + 2*negsumLL
