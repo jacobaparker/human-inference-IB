@@ -689,3 +689,15 @@ def compute_neg_sum_log_likelihood(sj_choices,model_fn,params):
 
 def compute_BIC(num_params,num_trials,negsumLL):
     return num_params*np.log(num_trials) + 2*negsumLL
+
+### Function for information efficiency versus parameter value analyses
+
+def get_efficiency_vs_parameter_curve(target_param_vals,Ixr_param_vals,P_RgX_fn,Xemp,Yemp,Ixr_vals,opt_bound):
+    efficiencies = []
+    for param_val in target_param_vals:
+        P_RgX_fn_ = lambda Ixr_param_val: P_RgX_fn(param_val, Ixr_param_val)
+        ibcurve = get_general_IB_curve_emp(Ixr_param_vals,Xemp,Yemp,P_RgX_fn_)
+        Iry_curve = np.interp(Ixr_vals, ibcurve['I_XR'], ibcurve['I_RY'])
+        Iry_opt = np.interp(Ixr_vals,opt_bound['I_XR'], opt_bound['I_RY'])
+        efficiencies.append(np.mean(Iry_curve / Iry_opt))
+    return efficiencies
