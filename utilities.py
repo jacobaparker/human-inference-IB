@@ -224,6 +224,8 @@ def solve_IB(beta, p_XgY, p_Y, iterlimit=100000, init='random', N_inits=3, betas
             p_RX = np.exp(rng.random((N_x,N_y)))
             p_RgX = p_RX / np.sum(p_RX,axis=1,keepdims=True)
         elif init == 'softmax':
+            if betastar is None:
+                betastar = beta
             p_RgX = np.exp(betastar*p_YgX) / np.sum(np.exp(betastar*p_YgX),axis=1,keepdims=True)
         p_XgR = (p_RgX * p_X) / p_R
         p_YgR =  p_YgX.T @ p_XgR
@@ -290,11 +292,14 @@ def solve_IB_mp(args):
     return solve_IB(beta, p_XgY, p_Y, iterlimit=iterlimit, init=init, N_inits=N_inits, betastar=betastar, base_seed=base_seed, ib_num=ib_num, return_dict=False)
 
 # beta, p_XgY, p_Y, iterlimit, init, N_inits, betastar, base_seed, ib_num = args
-def get_IB_bound(p_XgY,p_Y,N_b=1000,max_b=50,iterlimit=100000,init='random', N_inits=3, betastar=None, N_threads=1, base_seed=209, enforce_monotonic=True):
-    beta_array = np.linspace(max_b/N_b,max_b,N_b)
+def get_IB_bound(p_XgY,p_Y,N_b=1000,max_b=50,iterlimit=100000,beta_array=None,init='random', N_inits=3, betastar_array=None, N_threads=1, base_seed=209, enforce_monotonic=True):
+    if beta_array is None:
+        beta_array = np.linspace(max_b/N_b,max_b,N_b)
+    # if betastar_array is None:
+    #     betastar_array = np.zeros(N_b)
 
     with mp.Pool(processes=N_threads) as pool:
-        results = [pool.apply_async(solve_IB_mp, args=((beta_array[ib], p_XgY, p_Y, iterlimit, init, N_inits, betastar, base_seed, ib),)) for ib in range(N_b)]
+        results = [pool.apply_async(solve_IB_mp, args=((beta_array[ib], p_XgY, p_Y, iterlimit, init, N_inits, betastar_array[ib] if betastar_array is not None else None, base_seed, ib),)) for ib in range(N_b)]
         results = [res.get() for res in results]
     I_XR = [res[0] for res in results]
     I_RY = [res[1] for res in results]
@@ -369,11 +374,14 @@ def get_IB_emp(beta,Xemp,Xset,Yemp,p_XgY_true,p_Y_true, iterlimit=100000, init='
 def get_IB_emp_mp(args):
     return get_IB_emp(*args)
 
-def get_IB_bound_emp(Xemp,Xset,Yemp,p_XgY_true,p_Y_true,N_b=1000,max_b=50,iterlimit=100000,init='random', N_inits=3, betastar=None, N_threads=1, base_seed=209, enforce_monotonic=True):
-    beta_array = np.linspace(max_b/N_b,max_b,N_b)
+def get_IB_bound_emp(Xemp,Xset,Yemp,p_XgY_true,p_Y_true,N_b=1000,max_b=50,beta_array=None,iterlimit=100000,init='random', N_inits=3, betastar_array=None, N_threads=1, base_seed=209, enforce_monotonic=True):
+    if beta_array is None:
+        beta_array = np.linspace(max_b/N_b,max_b,N_b)
+    # if betastar_array is None:
+    #     betastar_array = np.zeros(N_b)
 
     with mp.Pool(processes=N_threads) as pool:
-        results = [pool.apply_async(get_IB_emp_mp, args=((beta_array[ib], Xemp, Xset, Yemp, p_XgY_true, p_Y_true, iterlimit, init, N_inits, betastar, base_seed, ib, False),)) for ib in range(N_b)]
+        results = [pool.apply_async(get_IB_emp_mp, args=((beta_array[ib], Xemp, Xset, Yemp, p_XgY_true, p_Y_true, iterlimit, init, N_inits, betastar_array[ib] if betastar_array is not None else None, base_seed, ib, False),)) for ib in range(N_b)]
         results = [res.get() for res in results]
     I_XR_emp = [res[0] for res in results]
     I_RY_emp = [res[1] for res in results]
@@ -442,8 +450,9 @@ def get_softmax_IB(betastar,p_XgY,p_Y,return_dict=True):
     else:
         return I_XR, I_RY, betastar, H_R, accuracy, alphastar, beta, p_RgX, p_YgR, p_R
 
-def get_softmax_IB_curve(p_XgY,p_Y,N_b=1000,max_b=50):
-    betastar_array = np.linspace(max_b/N_b,max_b,N_b)
+def get_softmax_IB_curve(p_XgY,p_Y,N_b=1000,max_b=50,betastar_array=None):
+    if betastar_array is None:
+        betastar_array = np.linspace(max_b/N_b,max_b,N_b)
     I_XRs, I_RYs, H_Rs, accuracies, alphastars, betas, p_RgXs, p_YgRs, p_Rs = [], [], [], [], [], [], [], [], []
     for betastar in betastar_array:
         out = get_softmax_IB(betastar,p_XgY,p_Y,return_dict=False)
@@ -503,8 +512,9 @@ def get_softmax_IB_emp(betastar,Xemp,Yemp,p_YgX_emp,return_dict=True):
     else:
         return I_XR_emp, I_RY_emp, betastar, H_R_emp, accuracy, alphastar, beta, p_RgX_emp, p_YgR_emp, p_R_emp
 
-def get_softmax_IB_curve_emp(Xemp,Yemp,p_YgX_emp,N_b=1000,max_b=50):
-    betastar_array = np.linspace(max_b/N_b,max_b,N_b)
+def get_softmax_IB_curve_emp(Xemp,Yemp,p_YgX_emp,N_b=1000,max_b=50,betastar_array=None):
+    if betastar_array is None:
+        betastar_array = np.linspace(max_b/N_b,max_b,N_b)
     I_XRs, I_RYs, H_Rs, accuracies, alphastars, betas, p_RgXs, p_YgRs, p_Rs = [], [], [], [], [], [], [], [], []
     for betastar in betastar_array:
         out = get_softmax_IB_emp(betastar,Xemp,Yemp,p_YgX_emp,return_dict=False)
