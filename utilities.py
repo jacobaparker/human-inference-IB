@@ -253,7 +253,6 @@ def solve_IB(beta, p_XgY, p_Y, iterlimit=100000, init='random', N_inits=3, betas
             delta = np.abs(IB_fxn - IB_fxn_last)
             iters += 1
             if iters == iterlimit:
-                print(f"Warning: IB algorithm did not converge after {iterlimit} iterations for beta={beta:.4f}")
                 break
         IB_fxn_vals.append(IB_fxn.copy())
         p_RgXs.append(p_RgX.copy())
@@ -718,15 +717,45 @@ def split_to_four_digits(arr):
     result = result[:, ::-1]  # reverse the order to get [shape1, shape2, shape3, shape4]
     return result
 
-def get_shapes_Xset():
+def split_to_digits(arr):
+    # split an array of integers into an array of digits, where each digit is a shape type
+    arr = arr.astype(int)
+    N_shapes = len(str(np.max(arr)))
+    result = np.zeros((arr.shape[0], N_shapes), dtype=int)
+    for i, num in enumerate(arr):
+        digits = list(str(num).zfill(N_shapes))
+        result[i] = [int(d) for d in digits]
+    result = result[:, ::-1]  # reverse the order
+    return result
+
+def get_shapes_Xset(encoding='full'):
     # get all possible shape combinations (with replacement) for 5 shapes and 4 shape types
-    shape_combs = list(combinations_with_replacement(range(4), 5))
-    Xset = np.array(shape_combs)
-    # change to encode how many of each shape type are present in order of num_shape1, num_shape2, num_shape3, num_shape4
-    Xset_counts = np.zeros((Xset.shape[0], 4), dtype=int)
-    for i, comb in enumerate(Xset):
-        for shape in comb:
-            Xset_counts[i, shape] += 1
+    if encoding == 'full':
+        shape_combs = list(combinations_with_replacement(range(4), 5))
+        Xset = np.array(shape_combs)
+        # change to encode how many of each shape type are present in order of num_shape1, num_shape2, num_shape3, num_shape4
+        Xset_counts = np.zeros((Xset.shape[0], 4), dtype=int)
+        for i, comb in enumerate(Xset):
+            for shape in comb:
+                Xset_counts[i, shape] += 1
+    if encoding == 'equal-weights':
+        Xset_counts = np.arange(5+1)
+        Xset_counts = np.array([Xset_counts, 5-Xset_counts]).T
+    if encoding == 'ignore-weak':
+        shape_combs = list(combinations_with_replacement(range(4), 5))
+        Xset = np.array(shape_combs)
+        # change to encode how many of each shape type are present in order of num_shape1, num_shape2, num_shape3, num_shape4
+        Xset_counts = np.zeros((Xset.shape[0], 4), dtype=int)
+        for i, comb in enumerate(Xset):
+            for shape in comb:
+                Xset_counts[i, shape] += 1
+        # if shape 1 or shape 4 is present, set count of shapes 2 and 3 to 0
+        for i in range(Xset_counts.shape[0]):
+            if Xset_counts[i,0] > 0 or Xset_counts[i,3] > 0:
+                Xset_counts[i,1] = 0
+                Xset_counts[i,2] = 0
+        # only get unique shape combs after ignoring weak shapes
+        Xset_counts = np.unique(Xset_counts, axis=0)
     return Xset_counts
 
 def gen_horses_trial_set(weakLLR,WSratio,p1,num_trials,num_shapes):
@@ -763,9 +792,12 @@ def P_shapecomb_g_horse(X, base, multiple, p1):
 def P_shapecomb_g_horse_ew(X, base, multiple, p1):
     optimal_llr = np.array([-base*multiple, -base, base, base*multiple]) 
     pdist1, pdist2 = llr2probs_4shapes(optimal_llr, p1)
-    pdist1_ew = np.array([pdist1[0]+pdist1[1], pdist1[0]+pdist1[1], pdist1[2]+pdist1[3],  pdist1[2]+pdist1[3]])
-    pdist2_ew = np.array([pdist2[0]+pdist2[1], pdist2[0]+pdist2[1], pdist2[2]+pdist2[3],  pdist2[2]+pdist2[3]])
-    unique_perms = factorial(5) / np.array([factorial(X[ii][0]+X[ii][1]) * factorial(X[ii][2]+X[ii][3]) for ii in range(X.shape[0])])
+    # pdist1_ew = np.array([pdist1[0]+pdist1[1], pdist1[0]+pdist1[1], pdist1[2]+pdist1[3],  pdist1[2]+pdist1[3]])
+    # pdist2_ew = np.array([pdist2[0]+pdist2[1], pdist2[0]+pdist2[1], pdist2[2]+pdist2[3],  pdist2[2]+pdist2[3]])
+    pdist1_ew = np.array([pdist1[0]+pdist1[1], pdist1[2]+pdist1[3]])
+    pdist2_ew = np.array([pdist2[0]+pdist2[1], pdist2[2]+pdist2[3]])
+    # unique_perms = factorial(5) / np.array([factorial(X[ii][0]+X[ii][1]) * factorial(X[ii][2]+X[ii][3]) for ii in range(X.shape[0])])
+    unique_perms = factorial(5) / np.array([factorial(X[ii]).prod() for ii in range(X.shape[0])])
     return np.column_stack(((pdist1_ew**X).prod(axis=1)*unique_perms,(pdist2_ew**X).prod(axis=1)*unique_perms))
 
 # compute likelihood of shape combination given horse, with ignoring the weak shapes (shapes 2 and 3) when strong shapes (shapes 1 and 4) are present
