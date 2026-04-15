@@ -291,7 +291,7 @@ def solve_IB_mp(args):
     return solve_IB(beta, p_XgY, p_Y, iterlimit=iterlimit, init=init, N_inits=N_inits, betastar=betastar, base_seed=base_seed, ib_num=ib_num, return_dict=False)
 
 # beta, p_XgY, p_Y, iterlimit, init, N_inits, betastar, base_seed, ib_num = args
-def get_IB_bound(p_XgY,p_Y,N_b=1000,max_b=50,iterlimit=100000,beta_array=None,init='random', N_inits=3, betastar_array=None, N_threads=1, base_seed=209, enforce_monotonic=True):
+def get_IB_bound(p_XgY,p_Y,N_b=1000,max_b=50,iterlimit=100000,beta_array=None,init='random', N_inits=3, betastar_array=None, N_threads=1, base_seed=209, enforce_monotonic=True, sort_by_beta=True):
     if beta_array is None:
         beta_array = np.linspace(max_b/N_b,max_b,N_b)
     # if betastar_array is None:
@@ -309,7 +309,11 @@ def get_IB_bound(p_XgY,p_Y,N_b=1000,max_b=50,iterlimit=100000,beta_array=None,in
     p_Rs = [res[6] for res in results]
 
     # to ensure that the points on the IB curve are in order of increasing beta, we can sort the results by beta before returning
-    sort_indices = np.argsort(betas)
+    # this can result in non-monotonicity of the IB bound when doing a point-by-point comparison with the softmax solution 
+    if sort_by_beta:
+        sort_indices = np.argsort(betas)
+    else:
+        sort_indices = np.arange(len(betas))
     out = {
         'I_XR': np.array(I_XR)[sort_indices],
         'I_RY': np.array(I_RY)[sort_indices],
@@ -373,7 +377,7 @@ def get_IB_emp(beta,Xemp,Xset,Yemp,p_XgY_true,p_Y_true, iterlimit=100000, init='
 def get_IB_emp_mp(args):
     return get_IB_emp(*args)
 
-def get_IB_bound_emp(Xemp,Xset,Yemp,p_XgY_true,p_Y_true,N_b=1000,max_b=50,beta_array=None,iterlimit=100000,init='random', N_inits=3, betastar_array=None, N_threads=1, base_seed=209, enforce_monotonic=True):
+def get_IB_bound_emp(Xemp,Xset,Yemp,p_XgY_true,p_Y_true,N_b=1000,max_b=50,beta_array=None,iterlimit=100000,init='random', N_inits=3, betastar_array=None, N_threads=1, base_seed=209, enforce_monotonic=True, sort_by_beta=True):
     if beta_array is None:
         beta_array = np.linspace(max_b/N_b,max_b,N_b)
     # if betastar_array is None:
@@ -391,7 +395,10 @@ def get_IB_bound_emp(Xemp,Xset,Yemp,p_XgY_true,p_Y_true,N_b=1000,max_b=50,beta_a
     p_Rs = [res[6] for res in results]
 
     # to ensure that the points on the IB curve are in order of increasing beta, we can sort the results by beta before returning
-    sort_indices = np.argsort(betas)
+    if sort_by_beta:
+        sort_indices = np.argsort(betas)
+    else:
+        sort_indices = np.arange(len(betas))
     out = {
         'I_XR': np.array(I_XR_emp)[sort_indices],
         'I_RY': np.array(I_RY_emp)[sort_indices],
