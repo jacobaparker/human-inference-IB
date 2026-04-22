@@ -713,16 +713,16 @@ def llr2probs_4shapes(llr,p1):
     return pdist1, pdist2
 
 # convert a an array of shape combination codes to array of 4 integers, where each integer is the count of a particular shape in the combination
-def split_to_four_digits(arr):
-    # order of input array is [shape4, shape3, shape2, shape1]
-    # need to convert to [shape1, shape2, shape3, shape4] eventually
-    arr = arr.astype(int)
-    result = np.zeros((arr.shape[0], 4), dtype=int)
-    for i, num in enumerate(arr):
-        digits = list(str(num).zfill(4))
-        result[i] = [int(d) for d in digits]
-    result = result[:, ::-1]  # reverse the order to get [shape1, shape2, shape3, shape4]
-    return result
+# def split_to_four_digits(arr):
+#     # order of input array is [shape4, shape3, shape2, shape1]
+#     # need to convert to [shape1, shape2, shape3, shape4] eventually
+#     arr = arr.astype(int)
+#     result = np.zeros((arr.shape[0], 4), dtype=int)
+#     for i, num in enumerate(arr):
+#         digits = list(str(num).zfill(4))
+#         result[i] = [int(d) for d in digits]
+#     result = result[:, ::-1]  # reverse the order to get [shape1, shape2, shape3, shape4]
+#     return result
 
 def split_to_digits(arr):
     # split an array of integers into an array of digits, where each digit is a shape type
@@ -811,12 +811,17 @@ def P_shapecomb_g_horse_ew(X, base, multiple, p1):
 def P_shapecomb_g_horse_iw(X, base, multiple, p1):
     optimal_llr = np.array([-base*multiple, -base, base, base*multiple]) 
     pdist1, pdist2 = llr2probs_4shapes(optimal_llr, p1)
-    Xstrong = X.copy()
-    Xstrong[:,1] = 0
-    Xstrong[:,2] = 0
-    Xiw = np.array([X[ii] if (X[ii,0]==0 and X[ii,3]==0) else Xstrong[ii] for ii in range(X.shape[0])])
-    unique_perms = np.array([factorial(Xiw[ii].sum()) for ii in range(Xiw.shape[0])]) / np.array([factorial(Xiw[ii]).prod() for ii in range(Xiw.shape[0])])
-    return np.column_stack(((pdist1**Xiw).prod(axis=1)*unique_perms,(pdist2**Xiw).prod(axis=1)*unique_perms))
+    weak_prob_strong = pdist1[1]+pdist1[2]
+    likelihood1 = np.array([(pdist1**X[ii]).prod() if (X[ii,0]==0 and X[ii,3]==0) else (pdist1**X[ii]).prod() * weak_prob_strong**(5-X[ii,0]-X[ii,3]) for ii in range(X.shape[0])])
+    likelihood2 = np.array([(pdist2**X[ii]).prod() if (X[ii,0]==0 and X[ii,3]==0) else (pdist2**X[ii]).prod() * weak_prob_strong**(5-X[ii,0]-X[ii,3]) for ii in range(X.shape[0])])
+    unique_perms = factorial(5) / np.array([factorial(X[ii]).prod() if (X[ii,0]==0 and X[ii,3]==0) else factorial(np.array([X[ii,0], X[ii,3], 5-X[ii,0]-X[ii,3]])).prod() for ii in range(X.shape[0])])
+    return np.column_stack((likelihood1*unique_perms, likelihood2*unique_perms))
+    # Xstrong = X.copy()
+    # Xstrong[:,1] = 0
+    # Xstrong[:,2] = 0
+    # Xiw = np.array([X[ii] if (X[ii,0]==0 and X[ii,3]==0) else Xstrong[ii] for ii in range(X.shape[0])])
+    # unique_perms = np.array([factorial(Xiw[ii].sum()) for ii in range(Xiw.shape[0])]) / np.array([factorial(Xiw[ii]).prod() for ii in range(Xiw.shape[0])])
+    # return np.column_stack(((pdist1**Xiw).prod(axis=1)*unique_perms,(pdist2**Xiw).prod(axis=1)*unique_perms))
 
 # compute posterior probability of horse given shape combination
 def P_horse_g_shapecomb(X, base, multiple, p1, p_Y, P_XgY=None):
