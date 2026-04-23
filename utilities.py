@@ -88,6 +88,9 @@ def classify_by_bound(Ixr_arr, Iry_arr, Iry_CI_low_arr, Iry_CI_up_arr, IB_bounds
     return bound_class_arr
 
 ### Functions for computing IB bounds/curves ###
+def compute_sumlog(A,B):
+    B[B==0] = 1e-12
+    return np.sum(A * np.log2(B))
 
 # compute I(X;R) using distributions, standalone version
 def compute_I_XR(p_RgX,p_XgY,p_Y):
@@ -785,7 +788,7 @@ def gen_horses_trial_set(weakLLR,WSratio,p1,num_trials,num_shapes):
         trial_arrays.append(trial_shapes)
         trial_codes.append((10**trial_shapes).sum())
 
-    trial_shapes = split_to_four_digits(np.array(trial_codes))
+    trial_shapes = split_to_digits(np.array(trial_codes))
     return trial_shapes, np.array(trial_codes)
 
 # compute likelihood of shape combination given horse
